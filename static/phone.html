@@ -90,8 +90,9 @@ $("save").onclick = () => {
 
 fetch(`${base}/list`).then(r => r.json()).then(j => {
   list = j.files;
-  const mb = list.reduce((s, f) => s + f.size, 0) / 1e6;
-  $("summary").textContent = `${list.length} photos · ${mb.toFixed(0)} MB. In the share sheet, choose “Save Images”.` +
+  const bytes = list.reduce((s, f) => s + f.size, 0);
+  const size = bytes >= 1e6 ? `${(bytes / 1e6).toFixed(0)} MB` : `${Math.ceil(bytes / 1e3)} KB`;
+  $("summary").textContent = `${list.length} photos · ${size}. In the share sheet, choose “Save Images”.` +
     (list.length > BATCH ? ` Photos are saved in batches of ${BATCH}.` : "");
   prepare();
 }).catch(() => { $("summary").textContent = "This link has expired. Create a new one on the PC."; });

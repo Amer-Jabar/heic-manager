@@ -53,12 +53,18 @@
   /* Library */
   main { padding:4px 20px 110px; }
   .empty { color:var(--muted); text-align:center; margin-top:18vh; font-size:17px; }
+  .loading { display:flex; flex-direction:column; align-items:center; gap:14px; margin-top:18vh; color:var(--muted); font-size:15px; }
+  .spinner { width:32px; height:32px; color:var(--muted); animation:spin .8s steps(8) infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .group-head { display:flex; align-items:baseline; gap:10px; margin:26px 0 10px; }
   .group-head h2 { font-size:22px; font-weight:700; letter-spacing:-.01em; margin:0; }
   .group-head .count { color:var(--muted); font-size:13px; }
   .group-head a { color:var(--accent); font-size:13px; text-decoration:none; }
   .group-head button { margin-left:auto; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:2px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(var(--tile, 150px), 1fr)); gap:2px; }
+  .zoom { display:flex; align-items:center; gap:2px; }
+  .zoom button { padding:4px 6px; color:var(--muted); }
+  .zoom input { width:90px; accent-color:var(--accent); }
   .tile { position:relative; aspect-ratio:1; background:var(--placeholder); overflow:hidden; cursor:pointer; user-select:none; }
   .tile img { width:100%; height:100%; object-fit:cover; display:block; opacity:0; transition:opacity .25s; }
   .tile img.shown { opacity:1; }
@@ -91,9 +97,10 @@
   dialog::backdrop { background:rgba(0,0,0,.35); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
   dialog h3 { margin:0 0 16px; font-size:20px; font-weight:700; }
   .sheet-actions { display:flex; justify-content:flex-end; margin-top:18px; }
-  .preview { display:flex; gap:24px; flex-wrap:wrap; }
-  .preview img { max-width:min(700px, 88vw); max-height:72vh; border-radius:10px; background:var(--placeholder); }
-  .meta-list { min-width:260px; background:var(--fill); border-radius:12px; padding:2px 14px; align-self:flex-start; }
+  .preview { display:flex; gap:24px; }
+  .preview img { max-width:min(700px, 60vw); max-height:72vh; border-radius:10px; background:var(--placeholder); }
+  .meta-list { width:320px; flex:none; background:var(--fill); border-radius:12px; padding:2px 14px; align-self:flex-start; }
+  @media (max-width: 800px) { .preview { flex-wrap:wrap; } .preview img { max-width:88vw; } }
   .meta-list div { display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:.5px solid var(--sep); font-size:13px; }
   .meta-list div:last-child { border-bottom:none; }
   .meta-list span:first-child { color:var(--muted); white-space:nowrap; }
@@ -143,6 +150,11 @@
       <option value="camera">Camera</option>
       <option value="gps">Has Location</option>
     </select></label>
+    <div class="zoom" title="Zoom (Ctrl + scroll, Ctrl + / Ctrl −)">
+      <button id="zoomOut" aria-label="Zoom out"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+      <input type="range" id="zoom" min="80" max="400" step="10" value="150" aria-label="Thumbnail size">
+      <button id="zoomIn" aria-label="Zoom in"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    </div>
     <button id="selAll">Select All</button>
     <button id="selNone">Deselect</button>
   </div>
@@ -188,7 +200,10 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const PIN = '<svg class="i" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
 const ARROW_UP = '<svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
-const ARROW_DOWN = '<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+// Apple-style activity indicator: 8 spokes fading around the circle.
+const SPINNER = `<svg class="spinner" viewBox="0 0 32 32">${[...Array(8)].map((_, i) =>
+  `<rect x="14.5" y="2" width="3" height="8" rx="1.5" fill="currentColor" opacity="${(1 - i * 0.11).toFixed(2)}" transform="rotate(${-i * 45} 16 16)"/>`).join("")}</svg>`;
+const ARROW_DOWN ='<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
 
 // ---- Thumbnails: fetched only after a tile has stayed on screen for 3 s; aborted when it scrolls away.
 const DWELL_MS = 3000;
@@ -250,7 +265,9 @@ async function api(url, body) {
 async function load(folder) {
   if (!folder) return;
   $("folder").value = folder;
-  $("status").textContent = "Reading metadata…";
+  $("status").textContent = "";
+  resetObserver();
+  $("list").innerHTML = `<div class="loading">${SPINNER}<span>Reading photos…</span></div>`;
   try {
     files = (await api("/api/scan", { folder, recursive: $("recursive").checked })).files;
     selected.clear();
@@ -259,7 +276,10 @@ async function load(folder) {
     thumbs.clear();
     $("status").textContent = plural(files.length, "Photo");
     render();
-  } catch (e) { $("status").textContent = e.message; }
+  } catch (e) {
+    $("list").innerHTML = '<p class="empty"></p>';
+    $("list").firstChild.textContent = e.message;
+  }
 }
 
 function sortValue(f, key) {
@@ -400,7 +420,30 @@ $("recursive").onchange = () => load($("folder").value.trim());
 $("sort").onchange = $("group").onchange = render;
 $("dir").innerHTML = ARROW_UP;
 $("dir").onclick = () => { ascending = !ascending; render(); };
-$("selAll").onclick = () => { files.forEach(f => selected.add(f.id)); updateSel(); };
+// ---- Zoom: thumbnail size via slider, buttons, Ctrl + wheel, or Ctrl +/-.
+function setZoom(px) {
+  const z = $("zoom");
+  z.value = Math.min(+z.max, Math.max(+z.min, px));
+  document.documentElement.style.setProperty("--tile", z.value + "px");
+  try { localStorage.setItem("zoom", z.value); } catch {}
+}
+const ZOOM_STEP = 30;
+$("zoom").oninput = () => setZoom(+$("zoom").value);
+$("zoomIn").onclick = () => setZoom(+$("zoom").value + ZOOM_STEP);
+$("zoomOut").onclick = () => setZoom(+$("zoom").value - ZOOM_STEP);
+addEventListener("wheel", e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  setZoom(+$("zoom").value - Math.sign(e.deltaY) * ZOOM_STEP);
+}, { passive: false });
+addEventListener("keydown", e => {
+  if (!e.ctrlKey) return;
+  if (e.key === "=" || e.key === "+") { e.preventDefault(); setZoom(+$("zoom").value + ZOOM_STEP); }
+  if (e.key === "-") { e.preventDefault(); setZoom(+$("zoom").value - ZOOM_STEP); }
+});
+try { setZoom(+localStorage.getItem("zoom") || 150); } catch { setZoom(150); }
+
+$("selAll").onclick =() => { files.forEach(f => selected.add(f.id)); updateSel(); };
 $("selNone").onclick = () => { selected.clear(); updateSel(); };
 $("send").onclick = async () => {
   const ids = ordered.filter(f => selected.has(f.id)).map(f => f.id);
