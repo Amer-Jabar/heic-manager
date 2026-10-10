@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Save to Photos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<style>
+  :root { --bg:#f2f2f7; --card:#fff; --text:#000; --muted:rgba(60,60,67,.6); --sep:rgba(60,60,67,.29); --accent:#007aff; --green:#34c759; --track:rgba(120,120,128,.2); }
+  @media (prefers-color-scheme: dark) { :root { --bg:#000; --card:#1c1c1e; --text:#fff; --muted:rgba(235,235,245,.6); --sep:rgba(84,84,88,.65); --accent:#0a84ff; --green:#30d158; --track:rgba(120,120,128,.36); } }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:calc(env(safe-area-inset-top) + 28px) 16px calc(env(safe-area-inset-bottom) + 24px);
+    font:17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:460px; margin:0 auto; }
+  h1 { font-size:34px; font-weight:700; letter-spacing:.01em; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:15px; margin:0 0 24px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:20px; }
+  .stat { display:flex; justify-content:space-between; font-size:15px; margin-bottom:10px; }
+  .stat span:last-child { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .track { height:6px; background:var(--track); border-radius:3px; overflow:hidden; }
+  .fill { height:100%; width:0; background:var(--accent); border-radius:3px; transition:width .3s; }
+  .fill.done { background:var(--green); }
+  button { width:100%; padding:15px; font:inherit; font-weight:600; border:none; border-radius:14px; background:var(--accent); color:#fff; -webkit-tap-highlight-color:transparent; }
+  button:active { opacity:.7; }
+  button:disabled { opacity:.4; }
+  .note { color:var(--muted); font-size:13px; text-align:center; margin:12px 8px 0; min-height:1em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Save to Photos</h1>
+  <p class="sub" id="summary">Loading…</p>
+  <div class="card">
+    <div class="stat"><span>Saved</span><span id="count">0 of 0</span></div>
+    <div class="track"><div class="fill" id="bar"></div></div>
+  </div>
+  <button id="save" disabled>Preparing…</button>
+  <p class="note" id="msg"></p>
+</div>
+<script>
+const BATCH = 50;
+const base = location.pathname;
+const $ = id => document.getElementById(id);
+let list = [], batchStart = 0, ready = null;
+
+function progress() {
+  $("count").textContent = `${batchStart} of ${list.length}`;
+  $("bar").style.width = list.length ? `${batchStart / list.length * 100}%` : "0";
+  $("bar").classList.toggle("done", list.length > 0 && batchStart >= list.length);
+}
+
+async function prepare() {
+  ready = null;
+  progress();
+  if (batchStart >= list.length) {
+    $("save").disabled = true;
+    $("save").textContent = "All Done";
+    $("msg").textContent = "Open Photos: each picture is placed by its original date and location.";
+    return;
+  }
+  const items = list.slice(batchStart, batchStart + BATCH);
+  $("save").disabled = true;
+  const files = [];
+  for (const it of items) {
+    $("save").textContent = `Downloading ${files.length + 1} of ${items.length}…`;
+    const blob = await (await fetch(`${base}/file/${it.index}`)).blob();
+    files.push(new File([blob], it.name, { type: "image/heic" }));
+  }
+  if (!navigator.canShare || !navigator.canShare({ files })) {
+    $("save").textContent = "Not Supported";
+    $("msg").textContent = "This browser can't save files to Photos. Open this link in Safari (iOS 15 or later).";
+    return;
+  }
+  ready = files;
+  $("save").disabled = false;
+  $("save").textContent = `Save Photos ${batchStart + 1}–${batchStart + files.length}`;
+}
+
+// navigator.share must run directly inside the tap, so files are downloaded beforehand.
+$("save").onclick = () => {
+  if (!ready) return;
+  navigator.share({ files: ready }).then(() => {
+    batchStart += ready.length;
+    $("msg").textContent = "";
+    prepare();
+  }).catch(e => {
+    $("msg").textContent = e.name === "AbortError" ? "Cancelled. Tap again and choose “Save Images”." : e.message;
+  });
+};
+
+fetch(`${base}/list`).then(r => r.json()).then(j => {
+  list = j.files;
+  const mb = list.reduce((s, f) => s + f.size, 0) / 1e6;
+  $("summary").textContent = `${list.length} photos · ${mb.toFixed(0)} MB. In the share sheet, choose “Save Images”.` +
+    (list.length > BATCH ? ` Photos are saved in batches of ${BATCH}.` : "");
+  prepare();
+}).catch(() => { $("summary").textContent = "This link has expired. Create a new one on the PC."; });
+</script>
+</body>
+</html>

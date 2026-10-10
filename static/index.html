@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HEIC Explorer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#fff; --fill:rgba(118,118,128,.12); --fill2:rgba(118,118,128,.2); --text:#1d1d1f; --muted:rgba(60,60,67,.6);
+    --sep:rgba(60,60,67,.18); --bar:rgba(250,250,252,.78); --accent:#007aff; --orange:#ff9500; --sheet:#fff;
+    --placeholder:#f2f2f7; --shadow:0 10px 40px rgba(0,0,0,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#000; --fill:rgba(118,118,128,.24); --fill2:rgba(118,118,128,.36); --text:#f5f5f7; --muted:rgba(235,235,245,.6);
+      --sep:rgba(84,84,88,.6); --bar:rgba(28,28,30,.78); --accent:#0a84ff; --orange:#ff9f0a; --sheet:#1c1c1e;
+      --placeholder:#1c1c1e; --shadow:0 10px 40px rgba(0,0,0,.6);
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased;
+    font:14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  svg.i { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; vertical-align:-3px; }
+
+  /* Top bar */
+  .bar { position:sticky; top:0; z-index:5; background:var(--bar); backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px); border-bottom:.5px solid var(--sep); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 20px; }
+  .title { font-size:26px; font-weight:700; letter-spacing:-.02em; margin:0; }
+  #status { color:var(--muted); font-size:13px; }
+  .search { flex:1; min-width:220px; display:flex; align-items:center; gap:6px; background:var(--fill); border-radius:10px; padding:0 10px; color:var(--muted); }
+  .search input { flex:1; border:none; background:none; outline:none; color:var(--text); font:inherit; padding:7px 0; }
+  .spacer { flex:1; }
+
+  button { font:inherit; cursor:pointer; border:none; background:none; color:var(--accent); padding:6px 10px; border-radius:8px; }
+  button:hover { background:var(--fill); }
+  button:disabled { opacity:.4; cursor:default; background:none; }
+  button.pill { background:var(--accent); color:#fff; border-radius:980px; padding:7px 16px; font-weight:500; }
+  button.pill:hover { filter:brightness(1.08); }
+  button.pill:disabled { background:var(--accent); }
+  button.tinted { background:var(--fill); border-radius:980px; padding:7px 14px; font-weight:500; }
+  button.tinted:hover { background:var(--fill2); }
+
+  .field { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+  select { appearance:none; -webkit-appearance:none; font:inherit; font-size:13px; color:var(--text); background:var(--fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+    border:none; border-radius:8px; padding:5px 28px 5px 10px; cursor:pointer; }
+  select option { background:var(--sheet); }
+  .switch { display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; cursor:pointer; }
+  .switch input { appearance:none; -webkit-appearance:none; width:36px; height:22px; border-radius:11px; background:var(--fill2); position:relative; cursor:pointer; transition:background .2s; margin:0; }
+  .switch input::after { content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .2s; }
+  .switch input:checked { background:#34c759; }
+  .switch input:checked::after { transform:translateX(14px); }
+
+  /* Library */
+  main { padding:4px 20px 110px; }
+  .empty { color:var(--muted); text-align:center; margin-top:18vh; font-size:17px; }
+  .group-head { display:flex; align-items:baseline; gap:10px; margin:26px 0 10px; }
+  .group-head h2 { font-size:22px; font-weight:700; letter-spacing:-.01em; margin:0; }
+  .group-head .count { color:var(--muted); font-size:13px; }
+  .group-head a { color:var(--accent); font-size:13px; text-decoration:none; }
+  .group-head button { margin-left:auto; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:2px; }
+  .tile { position:relative; aspect-ratio:1; background:var(--placeholder); overflow:hidden; cursor:pointer; user-select:none; }
+  .tile img { width:100%; height:100%; object-fit:cover; display:block; opacity:0; transition:opacity .25s; }
+  .tile img.shown { opacity:1; }
+  .tile.failed::before { content:"Can't load"; position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:12px; }
+  .tile .caption { position:absolute; inset:auto 0 0 0; padding:18px 8px 6px; color:#fff; font-size:11px; line-height:1.3;
+    background:linear-gradient(transparent, rgba(0,0,0,.55)); opacity:0; transition:opacity .15s; pointer-events:none; }
+  .tile:hover .caption { opacity:1; }
+  .tile .caption div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile .badges { position:absolute; top:6px; left:6px; display:flex; gap:4px; pointer-events:none; }
+  .badge { height:20px; min-width:20px; padding:0 5px; border-radius:10px; display:flex; align-items:center; gap:3px; font-size:11px; font-weight:600;
+    background:rgba(0,0,0,.45); color:#fff; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  .badge.warn { background:var(--orange); }
+  .badge svg.i { width:12px; height:12px; }
+  .tile .check { position:absolute; right:6px; bottom:6px; width:22px; height:22px; border-radius:50%; border:1.5px solid #fff;
+    box-shadow:0 0 3px rgba(0,0,0,.4); opacity:0; transition:opacity .15s; display:grid; place-items:center; pointer-events:none; }
+  .tile:hover .check { opacity:.9; }
+  .tile.sel::after { content:""; position:absolute; inset:0; background:rgba(255,255,255,.22); pointer-events:none; }
+  .tile.sel .check { opacity:1; background:var(--accent); z-index:1; }
+  .tile.sel .check::before { content:""; width:5px; height:10px; border:solid #fff; border-width:0 2px 2px 0; transform:translate(0,-1px) rotate(45deg); }
+
+  /* Floating bottom toolbar */
+  .dock { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:5; display:flex; align-items:center; gap:14px;
+    padding:8px 8px 8px 20px; border-radius:980px; background:var(--bar); backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px);
+    box-shadow:var(--shadow); border:.5px solid var(--sep); white-space:nowrap; max-width:calc(100vw - 32px); }
+  #selCount { font-weight:600; }
+  #hint { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+
+  /* Sheets */
+  dialog { border:none; border-radius:16px; background:var(--sheet); color:var(--text); padding:24px; box-shadow:var(--shadow); max-width:min(1100px, 94vw); }
+  dialog::backdrop { background:rgba(0,0,0,.35); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  dialog h3 { margin:0 0 16px; font-size:20px; font-weight:700; }
+  .sheet-actions { display:flex; justify-content:flex-end; margin-top:18px; }
+  .preview { display:flex; gap:24px; flex-wrap:wrap; }
+  .preview img { max-width:min(700px, 88vw); max-height:72vh; border-radius:10px; background:var(--placeholder); }
+  .meta-list { min-width:260px; background:var(--fill); border-radius:12px; padding:2px 14px; align-self:flex-start; }
+  .meta-list div { display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:.5px solid var(--sep); font-size:13px; }
+  .meta-list div:last-child { border-bottom:none; }
+  .meta-list span:first-child { color:var(--muted); white-space:nowrap; }
+  .meta-list span:last-child { text-align:right; word-break:break-all; }
+  .meta-list a { color:var(--accent); text-decoration:none; }
+  .warn-text { color:var(--orange); }
+  #qr svg { width:220px; height:220px; background:#fff; padding:10px; border-radius:14px; display:block; }
+  .steps { margin:0; padding:0; list-style:none; counter-reset:s; max-width:400px; }
+  .steps li { counter-increment:s; display:flex; gap:12px; margin-bottom:14px; }
+  .steps li::before { content:counter(s); flex:none; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff; font-size:13px; font-weight:600; display:grid; place-items:center; }
+  .link { color:var(--muted); font-size:12px; word-break:break-all; margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="row">
+    <h1 class="title">HEIC Explorer</h1>
+    <span id="status"></span>
+    <span class="spacer"></span>
+    <button class="tinted" id="pick">
+      <svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      Choose Folder</button>
+  </div>
+  <div class="row" style="padding-top:0">
+    <label class="search">
+      <svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <input type="text" id="folder" placeholder="Paste a folder path and press Enter">
+    </label>
+    <label class="switch"><input type="checkbox" id="recursive"> Subfolders</label>
+    <label class="field">Sort <select id="sort">
+      <option value="taken">Date Taken</option>
+      <option value="modified">File Modified</option>
+      <option value="name">Name</option>
+      <option value="size">Size</option>
+      <option value="lat">Latitude</option>
+      <option value="lon">Longitude</option>
+      <option value="camera">Camera</option>
+    </select></label>
+    <button id="dir" title="Sort direction"></button>
+    <label class="field">Group <select id="group">
+      <option value="none">None</option>
+      <option value="year">Years</option>
+      <option value="month" selected>Months</option>
+      <option value="day">Days</option>
+      <option value="loc1">Places (~1 km)</option>
+      <option value="loc10">Places (~10 km)</option>
+      <option value="camera">Camera</option>
+      <option value="gps">Has Location</option>
+    </select></label>
+    <button id="selAll">Select All</button>
+    <button id="selNone">Deselect</button>
+  </div>
+</div>
+<main id="list"><p class="empty">Choose a folder to see its HEIC photos.</p></main>
+<div class="dock">
+  <span id="selCount">No Photos Selected</span>
+  <span id="hint">Click to select · Shift-click for a range · Double-click for info</span>
+  <button class="pill" id="send" disabled>Send to iPhone</button>
+</div>
+
+<dialog id="previewDialog">
+  <h3 id="pvName"></h3>
+  <div class="preview"><img id="pvImg" alt=""><div class="meta-list" id="pvTable"></div></div>
+  <div class="sheet-actions"><button class="pill" onclick="previewDialog.close()">Done</button></div>
+</dialog>
+
+<dialog id="sendDialog">
+  <h3>Send <span id="sendCount"></span> to iPhone</h3>
+  <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
+    <div id="qr"></div>
+    <ol class="steps">
+      <li><span>Connect the iPhone to the same Wi-Fi network as this PC.</span></li>
+      <li><span>Scan the code with the iPhone Camera and open the link in <b>Safari</b>.</span></li>
+      <li><span>Safari warns about the connection, because this app signs its own certificate. Tap <b>Show Details</b>, then <b>visit this website</b>.</span></li>
+      <li><span>Tap <b>Save to Photos</b>, then choose <b>Save Images</b> in the share sheet. Do this once for each batch.</span></li>
+    </ol>
+  </div>
+  <p id="noDateWarn" class="warn-text"></p>
+  <div class="link" id="sendUrl"></div>
+  <div class="sheet-actions"><button class="pill" onclick="sendDialog.close()">Done</button></div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+let files = [], selected = new Set(), lastClicked = null, ascending = true, ordered = [];
+
+const fmtDate = f => f.taken ? f.taken.replace("T", " ") + (f.offset ? ` (UTC${f.offset})` : "") : null;
+const fmtSize = n => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
+const camera = f => [f.make, f.model].filter(Boolean).join(" ") || null;
+const mapLink = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=14/${lat}/${lon}`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const PIN = '<svg class="i" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
+const ARROW_UP = '<svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+const ARROW_DOWN = '<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+
+// ---- Thumbnails: fetched only after a tile has stayed on screen for 3 s; aborted when it scrolls away.
+const DWELL_MS = 3000;
+const thumbs = new Map();   // file id -> object URL (kept across re-sorts)
+const pending = new Map();  // tile -> { timer, ctrl }
+
+function cancel(tile) {
+  const p = pending.get(tile);
+  if (!p) return;
+  clearTimeout(p.timer);
+  p.ctrl.abort();
+  pending.delete(tile);
+}
+
+async function fetchThumb(tile, p) {
+  try {
+    const r = await fetch(`/api/thumb/${tile.dataset.id}`, { signal: p.ctrl.signal });
+    if (!r.ok) throw new Error(r.statusText);
+    const url = URL.createObjectURL(await r.blob());
+    thumbs.set(tile.dataset.id, url);
+    showThumb(tile, url);
+    observer.unobserve(tile);
+  } catch (e) {
+    if (e.name !== "AbortError") tile.classList.add("failed");
+  } finally {
+    if (pending.get(tile) === p) pending.delete(tile);
+  }
+}
+
+function showThumb(tile, url) {
+  const img = tile.querySelector("img");
+  img.onload = () => img.classList.add("shown");
+  img.src = url;
+}
+
+const observer = new IntersectionObserver(entries => {
+  for (const { target: tile, isIntersecting } of entries) {
+    if (!isIntersecting) { cancel(tile); continue; }
+    if (pending.has(tile) || thumbs.has(tile.dataset.id)) continue;
+    const p = { ctrl: new AbortController() };
+    p.timer = setTimeout(() => fetchThumb(tile, p), DWELL_MS);
+    pending.set(tile, p);
+  }
+});
+
+function resetObserver() {
+  observer.disconnect();
+  [...pending.keys()].forEach(cancel);
+}
+
+// ---- Data
+async function api(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function load(folder) {
+  if (!folder) return;
+  $("folder").value = folder;
+  $("status").textContent = "Reading metadata…";
+  try {
+    files = (await api("/api/scan", { folder, recursive: $("recursive").checked })).files;
+    selected.clear();
+    resetObserver();
+    thumbs.forEach(url => URL.revokeObjectURL(url));
+    thumbs.clear();
+    $("status").textContent = plural(files.length, "Photo");
+    render();
+  } catch (e) { $("status").textContent = e.message; }
+}
+
+function sortValue(f, key) {
+  return key === "camera" ? camera(f) : f[key];
+}
+
+function groupOf(f, key) {
+  const loc = d => {
+    if (f.lat == null) return ["~", "No Location"];
+    const la = f.lat.toFixed(d), lo = f.lon.toFixed(d);
+    return [`${la},${lo}`, `${la}, ${lo}`, mapLink(la, lo)];
+  };
+  const t = f.taken;
+  switch (key) {
+    case "year": return t ? [t.slice(0, 4), t.slice(0, 4)] : ["~", "No Date Taken"];
+    case "month": return t ? [t.slice(0, 7), `${MONTHS[+t.slice(5, 7) - 1]} ${t.slice(0, 4)}`] : ["~", "No Date Taken"];
+    case "day": return t ? [t.slice(0, 10), new Date(t.slice(0, 10) + "T12:00").toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })] : ["~", "No Date Taken"];
+    case "loc1": return loc(2);
+    case "loc10": return loc(1);
+    case "camera": return camera(f) ? [camera(f), camera(f)] : ["~", "Unknown Camera"];
+    case "gps": return f.lat != null ? ["a", "With Location"] : ["b", "Without Location"];
+    default: return ["", ""];
+  }
+}
+
+function render() {
+  const key = $("sort").value, gkey = $("group").value, dir = ascending ? 1 : -1;
+  $("dir").innerHTML = ascending ? ARROW_UP : ARROW_DOWN;
+  const cmp = (a, b) => {
+    const va = sortValue(a, key), vb = sortValue(b, key);
+    if (va == null && vb == null) return a.name.localeCompare(b.name);
+    if (va == null) return 1;           // missing values always last
+    if (vb == null) return -1;
+    return (va < vb ? -1 : va > vb ? 1 : 0) * dir || a.name.localeCompare(b.name);
+  };
+  const groups = new Map();
+  for (const f of files) {
+    const [gk, label, link] = groupOf(f, gkey);
+    if (!groups.has(gk)) groups.set(gk, { label, link, items: [] });
+    groups.get(gk).items.push(f);
+  }
+  const gkeys = [...groups.keys()].sort((a, b) => a === "~" ? 1 : b === "~" ? -1 : (a < b ? -1 : a > b ? 1 : 0) * dir);
+
+  resetObserver();
+  const list = $("list");
+  list.innerHTML = "";
+  ordered = [];
+  if (!files.length) { list.innerHTML = '<p class="empty">No HEIC photos in this folder.</p>'; updateSel(); return; }
+  for (const gk of gkeys) {
+    const g = groups.get(gk);
+    g.items.sort(cmp);
+    const sec = document.createElement("section");
+    if (gkey !== "none") {
+      const h = document.createElement("div");
+      h.className = "group-head";
+      h.innerHTML = `<h2></h2><span class="count">${plural(g.items.length, "Photo")}</span>`;
+      h.firstChild.textContent = g.label;
+      if (g.link) h.insertAdjacentHTML("beforeend", `<a href="${g.link}" target="_blank">Show Map ↗</a>`);
+      const b = document.createElement("button");
+      b.textContent = "Select";
+      b.onclick = () => { const all = g.items.every(f => selected.has(f.id)); g.items.forEach(f => all ? selected.delete(f.id) : selected.add(f.id)); updateSel(); };
+      h.append(b);
+      sec.append(h);
+    }
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    for (const f of g.items) {
+      ordered.push(f);
+      const t = document.createElement("div");
+      t.className = "tile";
+      t.dataset.id = f.id;
+      t.title = f.path;
+      t.innerHTML = `<img alt=""><div class="badges"></div><div class="caption"><div class="name"></div><div class="when"></div></div><span class="check"></span>`;
+      t.querySelector(".name").textContent = f.name;
+      t.querySelector(".when").textContent = f.taken ? f.taken.slice(0, 16).replace("T", " ") : "No date taken";
+      const badges = t.querySelector(".badges");
+      if (!f.taken) badges.insertAdjacentHTML("beforeend", '<span class="badge warn" title="No date taken: Photos would use the import date">!</span>');
+      if (f.lat != null) badges.insertAdjacentHTML("beforeend", `<span class="badge" title="Has location">${PIN}</span>`);
+      t.onclick = e => toggle(f, e.shiftKey);
+      t.ondblclick = () => preview(f);
+      if (thumbs.has(f.id)) showThumb(t, thumbs.get(f.id));
+      else observer.observe(t);
+      grid.append(t);
+    }
+    sec.append(grid);
+    list.append(sec);
+  }
+  updateSel();
+}
+
+function toggle(f, range) {
+  if (range && lastClicked) {
+    const a = ordered.indexOf(lastClicked), b = ordered.indexOf(f);
+    for (const x of ordered.slice(Math.min(a, b), Math.max(a, b) + 1)) selected.add(x.id);
+  } else {
+    selected.has(f.id) ? selected.delete(f.id) : selected.add(f.id);
+  }
+  lastClicked = f;
+  updateSel();
+}
+
+function updateSel() {
+  document.querySelectorAll(".tile").forEach(t => t.classList.toggle("sel", selected.has(t.dataset.id)));
+  $("selCount").textContent = selected.size ? `${plural(selected.size, "Photo")} Selected` : "No Photos Selected";
+  $("hint").style.display = selected.size ? "none" : "";
+  $("send").disabled = !selected.size;
+}
+
+function preview(f) {
+  $("pvImg").removeAttribute("src");
+  $("pvImg").src = `/api/preview/${f.id}`;
+  $("pvName").textContent = f.name;
+  const rows = [
+    ["Date Taken", fmtDate(f) || '<span class="warn-text">None. Photos would use the import date.</span>'],
+    ["Location", f.lat != null ? `${f.lat}, ${f.lon} · <a href="${mapLink(f.lat, f.lon)}" target="_blank">Map ↗</a>` : "None"],
+    ["Altitude", f.alt != null ? f.alt + " m" : null],
+    ["Camera", camera(f)], ["Lens", f.lens],
+    ["Dimensions", f.width ? `${f.width} × ${f.height}` : null],
+    ["Size", fmtSize(f.size)], ["File Modified", f.modified.replace("T", " ")],
+    ["Path", f.path], ["Error", f.error],
+  ];
+  const box = $("pvTable");
+  box.innerHTML = "";
+  for (const [k, v] of rows) {
+    if (v == null) continue;
+    const row = document.createElement("div");
+    row.innerHTML = "<span></span><span></span>";
+    row.firstChild.textContent = k;
+    (k === "Date Taken" || k === "Location") ? row.lastChild.innerHTML = v : row.lastChild.textContent = v;
+    box.append(row);
+  }
+  previewDialog.showModal();
+}
+
+$("pick").onclick = async () => { const { folder } = await api("/api/pick-folder"); load(folder); };
+$("folder").onkeydown = e => { if (e.key === "Enter") load($("folder").value.trim()); };
+$("recursive").onchange = () => load($("folder").value.trim());
+$("sort").onchange = $("group").onchange = render;
+$("dir").innerHTML = ARROW_UP;
+$("dir").onclick = () => { ascending = !ascending; render(); };
+$("selAll").onclick = () => { files.forEach(f => selected.add(f.id)); updateSel(); };
+$("selNone").onclick = () => { selected.clear(); updateSel(); };
+$("send").onclick = async () => {
+  const ids = ordered.filter(f => selected.has(f.id)).map(f => f.id);
+  const res = await api("/api/transfer", { ids });
+  $("qr").innerHTML = res.qr;
+  $("sendUrl").textContent = res.url;
+  $("sendCount").textContent = plural(res.count, "Photo");
+  const noDate = files.filter(f => selected.has(f.id) && !f.taken).length;
+  $("noDateWarn").textContent = noDate ? `${plural(noDate, "selected photo")} ${noDate === 1 ? "has" : "have"} no date taken. Photos will place ${noDate === 1 ? "it" : "them"} on the day ${noDate === 1 ? "it is" : "they are"} imported.` : "";
+  sendDialog.showModal();
+};
+</script>
+</body>
+</html>
